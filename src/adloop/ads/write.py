@@ -301,6 +301,101 @@ def draft_campaign(
     return preview
 
 
+def draft_sitelinks(
+    config: AdLoopConfig,
+    *,
+    customer_id: str = "",
+    campaign_id: str = "",
+    sitelinks: list[dict] | None = None,
+) -> dict:
+    """Draft sitelink extensions for a campaign — returns preview, does NOT execute.
+
+    sitelinks: list of dicts, each with:
+        - link_text (str, required, max 25 chars) — the clickable text
+        - final_url (str, required) — where the sitelink points
+        - description1 (str, optional, max 35 chars) — first description line
+        - description2 (str, optional, max 35 chars) — second description line
+    campaign_id: the campaign to attach sitelinks to
+    """
+    from adloop.safety.guards import SafetyViolation, check_blocked_operation
+    from adloop.safety.preview import ChangePlan, store_plan
+
+    try:
+        check_blocked_operation("create_sitelinks", config.safety)
+    except SafetyViolation as e:
+        return {"error": str(e)}
+
+    if not campaign_id:
+        return {"error": "campaign_id is required"}
+    if not sitelinks:
+        return {"error": "At least one sitelink is required"}
+
+    errors = []
+    warnings = []
+    validated = []
+
+    for i, sl in enumerate(sitelinks):
+        link_text = sl.get("link_text", "").strip()
+        final_url = sl.get("final_url", "").strip()
+        desc1 = sl.get("description1", "").strip()
+        desc2 = sl.get("description2", "").strip()
+
+        if not link_text:
+            errors.append(f"Sitelink {i + 1}: link_text is required")
+        elif len(link_text) > 25:
+            errors.append(
+                f"Sitelink {i + 1}: link_text '{link_text}' is {len(link_text)} chars (max 25)"
+            )
+        if not final_url:
+            errors.append(f"Sitelink {i + 1}: final_url is required")
+        if desc1 and len(desc1) > 35:
+            errors.append(
+                f"Sitelink {i + 1}: description1 is {len(desc1)} chars (max 35)"
+            )
+        if desc2 and len(desc2) > 35:
+            errors.append(
+                f"Sitelink {i + 1}: description2 is {len(desc2)} chars (max 35)"
+            )
+        if desc2 and not desc1:
+            warnings.append(
+                f"Sitelink {i + 1}: description2 without description1 — Google may ignore it"
+            )
+
+        validated.append({
+            "link_text": link_text,
+            "final_url": final_url,
+            "description1": desc1,
+            "description2": desc2,
+        })
+
+    if errors:
+        return {"error": "Validation failed", "details": errors}
+
+    if len(validated) < 2:
+        warnings.append(
+            "Google recommends at least 4 sitelinks per campaign. "
+            "Fewer than 2 may not show at all."
+        )
+    elif len(validated) < 4:
+        warnings.append(
+            f"Only {len(validated)} sitelinks — Google recommends at least 4 for "
+            f"maximum ad real estate."
+        )
+
+    plan = ChangePlan(
+        operation="create_sitelinks",
+        entity_type="campaign_asset",
+        entity_id=campaign_id,
+        customer_id=customer_id,
+        changes={"campaign_id": campaign_id, "sitelinks": validated},
+    )
+    store_plan(plan)
+    preview = plan.to_preview()
+    if warnings:
+        preview["warnings"] = warnings
+    return preview
+
+
 # ---------------------------------------------------------------------------
 # confirm_and_apply — the only function that actually mutates Google Ads
 # ---------------------------------------------------------------------------
@@ -637,6 +732,7 @@ def _execute_plan(config: AdLoopConfig, plan: object) -> dict:
         "pause_entity": _apply_status_change,
         "enable_entity": _apply_status_change,
         "remove_entity": _apply_remove,
+        "create_sitelinks": _apply_create_sitelinks,
     }
 
     handler = dispatch.get(plan.operation)
@@ -716,11 +812,13 @@ def _apply_create_campaign(client: object, cid: str, changes: dict) -> dict:
     campaign.network_settings.target_search_network = False
     campaign.network_settings.target_content_network = False
 
-    # Required for campaigns that may serve in EU countries (Google rejects
-    # the mutation without it). Non-political advertisers set this to false.
-    # Must use ._pb to force proto3 field presence — setting False on the
-    # proto-plus wrapper is indistinguishable from "not set" for default values.
-    campaign._pb.contains_eu_political_advertising = False
+    # EU political advertising declaration — required for campaigns that may
+    # serve in EU countries. This is an ENUM, not a bool. Value 3 means
+    # "does not contain EU political advertising" (the default for most users).
+    # Setting False/0 maps to UNSPECIFIED which proto3 strips from the wire.
+    campaign.contains_eu_political_advertising = (
+        client.enums.EuPoliticalAdvertisingStatusEnum.DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING
+    )
 
     operations.append(campaign_op)
 
@@ -748,7 +846,6 @@ def _apply_create_campaign(client: object, cid: str, changes: dict) -> dict:
 
     response = service.mutate(customer_id=cid, mutate_operations=operations)
 
-    resource_names = [r.mutate_operation_response for r in response.mutate_operation_responses]
     results = {}
     for i, resp in enumerate(response.mutate_operation_responses):
         resp_type = resp.WhichOneof("response")
@@ -849,6 +946,32 @@ def _apply_add_negative_keywords(client: object, cid: str, changes: dict) -> dic
     return {"resource_names": [r.resource_name for r in response.results]}
 
 
+def _resolve_ad_entity_id(client: object, cid: str, entity_id: str) -> str:
+    """Ensure ad entity_id is in 'adGroupId~adId' composite format.
+
+    If only a bare ad ID is given, queries the API to find the ad group.
+    """
+    if "~" in entity_id:
+        return entity_id
+
+    ga_service = client.get_service("GoogleAdsService")
+    query = (
+        f"SELECT ad_group.id, ad_group_ad.ad.id "
+        f"FROM ad_group_ad "
+        f"WHERE ad_group_ad.ad.id = {entity_id} "
+        f"LIMIT 1"
+    )
+    response = ga_service.search(customer_id=cid, query=query)
+    for row in response:
+        ag_id = row.ad_group.id
+        return f"{ag_id}~{entity_id}"
+
+    raise ValueError(
+        f"Ad ID {entity_id} not found. Pass the composite ID as "
+        f"'adGroupId~adId' (e.g. '12345678~{entity_id}')."
+    )
+
+
 def _apply_remove(
     client: object,
     cid: str,
@@ -873,9 +996,10 @@ def _apply_remove(
         )
 
     elif entity_type == "ad":
+        resolved_id = _resolve_ad_entity_id(client, cid, entity_id)
         service = client.get_service("AdGroupAdService")
         operation = client.get_type("AdGroupAdOperation")
-        operation.remove = f"customers/{cid}/adGroupAds/{entity_id}"
+        operation.remove = f"customers/{cid}/adGroupAds/{resolved_id}"
         response = service.mutate_ad_group_ads(
             customer_id=cid, operations=[operation]
         )
@@ -927,10 +1051,11 @@ def _apply_status_change(
         mutate = service.mutate_ad_groups
 
     elif entity_type == "ad":
+        resolved_id = _resolve_ad_entity_id(client, cid, entity_id)
         service = client.get_service("AdGroupAdService")
         operation = client.get_type("AdGroupAdOperation")
         entity = operation.update
-        entity.resource_name = f"customers/{cid}/adGroupAds/{entity_id}"
+        entity.resource_name = f"customers/{cid}/adGroupAds/{resolved_id}"
         entity.status = getattr(client.enums.AdGroupAdStatusEnum, status)
         mutate = service.mutate_ad_group_ads
 
@@ -948,9 +1073,63 @@ def _apply_status_change(
         raise ValueError(f"Unknown entity_type: {entity_type}")
 
     # Build field mask for the status field only
-    field_mask = client.get_type("FieldMask")
-    field_mask.paths.append("status")
-    client.copy_from(operation.update_mask, field_mask)
+    from google.protobuf import field_mask_pb2
+
+    operation.update_mask = field_mask_pb2.FieldMask(paths=["status"])
 
     response = mutate(customer_id=cid, operations=[operation])
     return {"resource_name": response.results[0].resource_name}
+
+
+def _apply_create_sitelinks(client: object, cid: str, changes: dict) -> dict:
+    """Create sitelink assets and link them to a campaign."""
+    asset_service = client.get_service("AssetService")
+    campaign_asset_service = client.get_service("CampaignAssetService")
+    googleads_service = client.get_service("GoogleAdsService")
+
+    campaign_id = changes["campaign_id"]
+    sitelinks = changes["sitelinks"]
+    operations = []
+
+    # Create Asset resources (one per sitelink) with temp IDs starting at -1
+    for i, sl in enumerate(sitelinks):
+        op = client.get_type("MutateOperation")
+        asset = op.asset_operation.create
+        asset.resource_name = asset_service.asset_path(cid, str(-(i + 1)))
+        asset.sitelink_asset.link_text = sl["link_text"]
+        asset.final_urls.append(sl["final_url"])
+        if sl.get("description1"):
+            asset.sitelink_asset.description1 = sl["description1"]
+        if sl.get("description2"):
+            asset.sitelink_asset.description2 = sl["description2"]
+        operations.append(op)
+
+    # Link each asset to the campaign
+    for i in range(len(sitelinks)):
+        op = client.get_type("MutateOperation")
+        ca = op.campaign_asset_operation.create
+        ca.asset = asset_service.asset_path(cid, str(-(i + 1)))
+        ca.campaign = googleads_service.campaign_path(cid, campaign_id)
+        ca.field_type = client.enums.AssetFieldTypeEnum.SITELINK
+        operations.append(op)
+
+    response = googleads_service.mutate(
+        customer_id=cid, mutate_operations=operations
+    )
+
+    results = {"assets": [], "campaign_assets": []}
+    num_sitelinks = len(sitelinks)
+    for i, resp in enumerate(response.mutate_operation_responses):
+        resource = None
+        if resp.asset_result.resource_name:
+            resource = resp.asset_result.resource_name
+        elif resp.campaign_asset_result.resource_name:
+            resource = resp.campaign_asset_result.resource_name
+
+        if resource:
+            if i < num_sitelinks:
+                results["assets"].append(resource)
+            else:
+                results["campaign_assets"].append(resource)
+
+    return results

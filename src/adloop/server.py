@@ -657,6 +657,39 @@ def remove_entity(
     )
 
 
+@mcp.tool(annotations=_WRITE)
+@_safe
+def draft_sitelinks(
+    campaign_id: str,
+    sitelinks: list[dict],
+    customer_id: str = "",
+) -> dict:
+    """Draft sitelink extensions for a campaign — returns a PREVIEW.
+
+    Sitelinks appear as additional links below your ad, increasing click area
+    and directing users to specific pages.
+
+    campaign_id: the campaign to attach sitelinks to
+    sitelinks: list of dicts, each with:
+        - link_text (str, required, max 25 chars) — the clickable text shown
+        - final_url (str, required) — destination URL for this sitelink
+        - description1 (str, optional, max 35 chars) — first description line
+        - description2 (str, optional, max 35 chars) — second description line
+
+    Google recommends at least 4 sitelinks per campaign. Fewer than 2 may not show.
+
+    Call confirm_and_apply with the returned plan_id to execute.
+    """
+    from adloop.ads.write import draft_sitelinks as _impl
+
+    return _impl(
+        _config,
+        customer_id=customer_id or _config.ads.customer_id,
+        campaign_id=campaign_id,
+        sitelinks=sitelinks,
+    )
+
+
 @mcp.tool(annotations=_DESTRUCTIVE)
 @_safe
 def confirm_and_apply(

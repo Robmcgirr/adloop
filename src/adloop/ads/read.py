@@ -75,7 +75,7 @@ def get_ad_performance(
     date_clause = _date_clause(date_range_start, date_range_end)
 
     query = f"""
-        SELECT campaign.name, ad_group.name,
+        SELECT campaign.name, campaign.id, ad_group.name, ad_group.id,
                ad_group_ad.ad.id, ad_group_ad.ad.type,
                ad_group_ad.ad.responsive_search_ad.headlines,
                ad_group_ad.ad.responsive_search_ad.descriptions,
