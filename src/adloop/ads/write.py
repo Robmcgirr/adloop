@@ -718,7 +718,9 @@ def _apply_create_campaign(client: object, cid: str, changes: dict) -> dict:
 
     # Required for campaigns that may serve in EU countries (Google rejects
     # the mutation without it). Non-political advertisers set this to false.
-    campaign.contains_eu_political_advertising = False
+    # Must use ._pb to force proto3 field presence — setting False on the
+    # proto-plus wrapper is indistinguishable from "not set" for default values.
+    campaign._pb.contains_eu_political_advertising = False
 
     operations.append(campaign_op)
 
