@@ -4,6 +4,7 @@
 
 **MCP server that connects Google Ads + Google Analytics (GA4) into one AI-driven feedback loop inside your IDE.**
 
+[![PyPI](https://img.shields.io/pypi/v/adloop.svg)](https://pypi.org/project/adloop/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-8A2BE2.svg)](https://modelcontextprotocol.io)
@@ -29,7 +30,7 @@ One MCP server gives your AI assistant access to both Google Analytics and Googl
 
 ## What's Included — 26 Tools
 
-> **Quick start:** `git clone https://github.com/kLOsk/adloop.git && cd adloop && uv sync && uv run adloop init`
+> **Quick start:** `pip install adloop` or `git clone https://github.com/kLOsk/adloop.git && cd adloop && uv sync && uv run adloop init`
 
 ### Diagnostics
 
@@ -96,9 +97,12 @@ All write operations follow a **draft → preview → confirm** workflow. Nothin
 | `remove_entity` | Permanently remove an entity (irreversible — prefers pause). Supports keywords, negative keywords, ads, ad groups, campaigns. |
 | `confirm_and_apply` | Execute a previously previewed change |
 
-### Cursor Rules
+### Orchestration Rules
 
-AdLoop ships with orchestration rules (`.cursor/rules/adloop.mdc`) that teach the AI *how* to combine these tools — marketing workflows, GAQL syntax, safety protocols, GDPR awareness, and best practices. Without rules, the AI has tools but doesn't know the playbook.
+AdLoop ships with orchestration rules that teach the AI *how* to combine these tools — marketing workflows, GAQL syntax, safety protocols, GDPR awareness, and best practices. Without rules, the AI has tools but doesn't know the playbook.
+
+- **Cursor**: `.cursor/rules/adloop.mdc` (canonical source)
+- **Claude Code**: `.claude/rules/adloop.md` (synced from Cursor rules via `scripts/sync-rules.py`)
 
 The rules include:
 - **Orchestration patterns** for common workflows (performance review, conversion diagnosis, campaign creation, negative keyword hygiene, tracking validation, budget planning, landing page analysis)
@@ -106,6 +110,19 @@ The rules include:
 - **Safety rules** including Broad Match + Manual CPC prevention and pre-write validation
 - **Ad copy character limit guidance** (30-char headlines are shorter than you think)
 - **GDPR consent awareness** to prevent false tracking diagnoses in EU markets
+
+### Slash Commands (Claude Code)
+
+AdLoop includes pre-built slash commands in `.claude/commands/` for common workflows:
+
+| Command | What It Does |
+|---------|-------------|
+| `/analyze-performance` | Full performance review across Google Ads + GA4 |
+| `/create-ad` | Create a responsive search ad with safety checks |
+| `/diagnose-tracking` | Diagnose tracking and conversion issues |
+| `/optimize-campaign` | Full optimization checklist for a campaign |
+| `/create-campaign` | Create a new search campaign with budget estimation |
+| `/budget-plan` | Estimate budget for keywords via Keyword Planner |
 
 ## Safety Model
 
@@ -127,6 +144,15 @@ AdLoop manages real ad spend, so safety is not optional.
 
 ### Quick Start (Recommended)
 
+**Option A — Install from PyPI:**
+
+```bash
+pip install adloop
+adloop init
+```
+
+**Option B — Install from source:**
+
 ```bash
 git clone https://github.com/kLOsk/adloop.git
 cd adloop
@@ -143,7 +169,7 @@ The `adloop init` wizard walks you through everything:
 5. **Customer IDs** — auto-formats `1234567890` → `123-456-7890`
 6. **Safety defaults** — budget cap and dry-run preference
 7. **OAuth authorization** — optionally opens your browser to complete auth immediately
-8. **Cursor config snippet** — prints the exact JSON to paste into `.cursor/mcp.json`
+8. **Editor config snippets** — prints MCP configuration for both Cursor and Claude Code
 
 ### Requirements
 
@@ -207,9 +233,9 @@ cp config.yaml.example ~/.adloop/config.yaml
 
 Edit `~/.adloop/config.yaml` and fill in the values from the previous steps. See [`config.yaml.example`](config.yaml.example) for a fully documented template.
 
-#### Step 6 — Connect to Cursor
+#### Step 6 — Connect to Your Editor
 
-Add to your project's `.cursor/mcp.json`:
+**Cursor** — Add to your project's `.cursor/mcp.json`:
 
 ```json
 {
@@ -223,6 +249,27 @@ Add to your project's `.cursor/mcp.json`:
 ```
 
 Then copy `.cursor/rules/adloop.mdc` from this repo into your project's `.cursor/rules/` directory.
+
+**Claude Code** — Run:
+
+```bash
+claude mcp add --transport stdio adloop -- /absolute/path/to/adloop/.venv/bin/python -m adloop
+```
+
+Or add to your project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "adloop": {
+      "command": "/absolute/path/to/adloop/.venv/bin/python",
+      "args": ["-m", "adloop"]
+    }
+  }
+}
+```
+
+Then copy `.claude/rules/adloop.md` and `.claude/commands/` from this repo into your project for orchestration rules and slash commands.
 
 </details>
 
@@ -301,8 +348,8 @@ What's been shipped and what's next:
 - ~~Tracking utilities (validate events against GA4, generate gtag code)~~ ✓
 - ~~Budget estimation via Keyword Planner~~ ✓
 - ~~Setup wizard (`adloop init`)~~ ✓
-- **PyPI package** — `pip install adloop`
-- **Claude Code plugin** — `.claude-plugin/plugin.json` + `.mcp.json` for Claude Code users
+- ~~Claude Code support~~ ✓ — `CLAUDE.md`, `.mcp.json`, `.claude/rules/`, `.claude/commands/`, CLI wizard snippets
+- ~~PyPI package~~ ✓ — `pip install adloop`
 - **Community launch** — HN, Indie Hackers, r/cursor, Twitter
 - **Video walkthrough**
 

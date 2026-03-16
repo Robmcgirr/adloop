@@ -175,6 +175,28 @@ def _generate_cursor_snippet() -> str:
     """).strip()
 
 
+def _generate_claude_code_snippet() -> str:
+    """Generate the Claude Code CLI command to add AdLoop as an MCP server."""
+    python_path = sys.executable
+    quoted = f'"{python_path}"' if " " in python_path else python_path
+    return f"claude mcp add --transport stdio adloop -- {quoted} -m adloop"
+
+
+def _generate_claude_json_snippet() -> str:
+    """Generate .mcp.json configuration for Claude Code."""
+    python_path = sys.executable
+    return textwrap.dedent(f"""\
+        {{
+          "mcpServers": {{
+            "adloop": {{
+              "command": "{python_path}",
+              "args": ["-m", "adloop"]
+            }}
+          }}
+        }}
+    """).strip()
+
+
 def _step_header(num: int, title: str) -> None:
     _print()
     _print(f"  ── Step {num}: {title} ──")
@@ -318,17 +340,36 @@ def run_init_wizard() -> None:
     else:
         _print("  Skipped — OAuth will run automatically on first tool call.")
 
-    # Cursor MCP snippet
+    # MCP configuration snippets
     _print()
-    _print("  ── Cursor MCP Configuration ──")
+    _print("  ── MCP Configuration ──")
+
+    # Cursor
     _print()
-    _print("  Add this to your project's .cursor/mcp.json:")
+    _print("  For Cursor, add to .cursor/mcp.json:")
     _print()
-    snippet = _generate_cursor_snippet()
-    for line in snippet.splitlines():
+    cursor_snippet = _generate_cursor_snippet()
+    for line in cursor_snippet.splitlines():
         _print(f"    {line}")
     _print()
-    _print("  Then restart Cursor to pick up the MCP server.")
+    _print("  Then copy .cursor/rules/adloop.mdc into your project.")
+
+    # Claude Code
+    _print()
+    _print("  For Claude Code, run:")
+    _print()
+    _print(f"    {_generate_claude_code_snippet()}")
+    _print()
+    _print("  Or add to your project's .mcp.json:")
+    _print()
+    claude_snippet = _generate_claude_json_snippet()
+    for line in claude_snippet.splitlines():
+        _print(f"    {line}")
+    _print()
+    _print("  Then copy .claude/rules/adloop.md and .claude/commands/ into your project.")
+
+    _print()
+    _print("  Restart your editor to pick up the MCP server.")
     _print()
     _print("  ✓ Setup complete!")
     _print()
