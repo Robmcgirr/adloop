@@ -1,6 +1,6 @@
 [project]
 name = "adloop"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP server connecting Google Ads + GA4 + codebase into one AI-driven feedback loop"
 readme = "README.md"
 authors = [
@@ -17,6 +17,12 @@ dependencies = [
     "google-auth-oauthlib>=1.0.0",
     "pyyaml>=6.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/kLOsk/adloop"
+Repository = "https://github.com/kLOsk/adloop"
+Issues = "https://github.com/kLOsk/adloop/issues"
+Changelog = "https://github.com/kLOsk/adloop/releases"
 
 [project.scripts]
 adloop = "adloop:main"
