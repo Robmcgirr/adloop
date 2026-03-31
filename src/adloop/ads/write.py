@@ -987,6 +987,40 @@ def draft_sitelinks(
 # ---------------------------------------------------------------------------
 
 
+def _extract_error_message(exc: Exception) -> str:
+    """Extract a meaningful error message from Google Ads API exceptions.
+
+    GoogleAdsException.__init__ doesn't call super().__init__(), so str(e)
+    returns ''. This function digs into the failure proto to surface the
+    actual error code, message, and trigger values.
+    """
+    try:
+        from google.ads.googleads.errors import GoogleAdsException
+
+        if isinstance(exc, GoogleAdsException) and exc.failure:
+            parts = []
+            for error in exc.failure.errors:
+                error_code = error.error_code
+                code_field = error_code.WhichOneof("error_code")
+                code_value = getattr(error_code, code_field) if code_field else "UNKNOWN"
+                line = f"[{code_field}={code_value.name if hasattr(code_value, 'name') else code_value}]"
+                if error.message:
+                    line += f" {error.message}"
+                if error.trigger and error.trigger.string_value:
+                    line += f" (trigger: {error.trigger.string_value})"
+                parts.append(line)
+            if parts:
+                msg = "; ".join(parts)
+                if exc.request_id:
+                    msg += f" [request_id={exc.request_id}]"
+                return msg
+    except Exception:
+        pass
+
+    fallback = str(exc)
+    return fallback if fallback else repr(exc)
+
+
 def confirm_and_apply(
     config: AdLoopConfig,
     *,
@@ -1036,6 +1070,7 @@ def confirm_and_apply(
     try:
         result = _execute_plan(config, plan)
     except Exception as e:
+        error_message = _extract_error_message(e)
         log_mutation(
             config.safety.log_file,
             operation=plan.operation,
@@ -1045,9 +1080,9 @@ def confirm_and_apply(
             changes=plan.changes,
             dry_run=False,
             result="error",
-            error=str(e),
+            error=error_message,
         )
-        return {"error": str(e), "plan_id": plan.plan_id}
+        return {"error": error_message, "plan_id": plan.plan_id}
 
     log_mutation(
         config.safety.log_file,
@@ -2171,17 +2206,13 @@ def _apply_remove(
         )
 
     elif entity_type == "campaign_asset":
-        # Campaign asset composite ID: {campaign_id}~{asset_id}~{field_type}
-        parts = entity_id.replace(",", "~").split("~")
+        parts = entity_id.split("~")
         if len(parts) != 3:
             raise ValueError(
                 f"campaign_asset entity_id must be "
                 f"'campaignId~assetId~fieldType', got '{entity_id}'"
             )
-        ca_service = client.get_service("CampaignAssetService")
-        resource_name = ca_service.campaign_asset_path(
-            cid, parts[0], parts[1], parts[2]
-        )
+        resource_name = f"customers/{cid}/campaignAssets/{entity_id}"
         ga_service = client.get_service("GoogleAdsService")
         op = client.get_type("MutateOperation")
         op.campaign_asset_operation.remove = resource_name
@@ -2202,14 +2233,13 @@ def _apply_remove(
         )
 
     elif entity_type == "customer_asset":
-        parts = entity_id.replace(",", "~").split("~")
+        parts = entity_id.split("~")
         if len(parts) != 2:
             raise ValueError(
                 f"customer_asset entity_id must be "
                 f"'assetId~fieldType', got '{entity_id}'"
             )
-        ca_service = client.get_service("CustomerAssetService")
-        resource_name = ca_service.customer_asset_path(cid, parts[0], parts[1])
+        resource_name = f"customers/{cid}/customerAssets/{entity_id}"
         ga_service = client.get_service("GoogleAdsService")
         op = client.get_type("MutateOperation")
         op.customer_asset_operation.remove = resource_name

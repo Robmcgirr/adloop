@@ -543,3 +543,73 @@ def test_apply_campaign_asset_variants_create_asset_and_link_operations(tmp_path
     )
     fallback_image_asset = google_ads_service.operations[0].asset_operation.create
     assert fallback_image_asset.name.startswith("AdLoop image square ")
+
+
+def test_apply_remove_campaign_asset_preserves_tildes_in_resource_name():
+    """The resource name for campaign_asset removal must use ~ separators."""
+    google_ads_service = _FakeGoogleAdsService(
+        [_FakeMutateOperationResponse("campaign_asset_result",
+            "customers/1234567890/campaignAssets/1001~99~SITELINK")]
+    )
+    client = _FakeClient({"GoogleAdsService": google_ads_service})
+
+    write._apply_remove(client, "1234567890", "campaign_asset", "1001~99~SITELINK")
+
+    op = google_ads_service.operations[0]
+    resource_name = op.campaign_asset_operation.remove
+    assert resource_name == "customers/1234567890/campaignAssets/1001~99~SITELINK"
+    assert "," not in resource_name
+
+
+def test_apply_remove_customer_asset_preserves_tildes_in_resource_name():
+    """The resource name for customer_asset removal must use ~ separators."""
+
+    class _CustomerAssetResponse:
+        customer_asset_result = _FakeResult(
+            "customers/1234567890/customerAssets/99~SITELINK"
+        )
+
+    google_ads_service = _FakeGoogleAdsService()
+    original_mutate = google_ads_service.mutate
+
+    def capturing_mutate(customer_id, mutate_operations):
+        google_ads_service.operations = mutate_operations
+        return SimpleNamespace(
+            mutate_operation_responses=[_CustomerAssetResponse()]
+        )
+
+    google_ads_service.mutate = capturing_mutate
+    client = _FakeClient({"GoogleAdsService": google_ads_service})
+
+    write._apply_remove(client, "1234567890", "customer_asset", "99~SITELINK")
+
+    op = google_ads_service.operations[0]
+    resource_name = op.customer_asset_operation.remove
+    assert resource_name == "customers/1234567890/customerAssets/99~SITELINK"
+    assert "," not in resource_name
+
+
+def test_remove_entity_normalizes_commas_to_tildes(config):
+    """remove_entity should accept commas and normalize to tildes in the stored plan."""
+    result = write.remove_entity(
+        config,
+        customer_id="123-456-7890",
+        entity_type="campaign_asset",
+        entity_id="1001,99,SITELINK",
+    )
+
+    assert result["entity_id"] == "1001~99~SITELINK"
+
+
+def test_extract_error_message_handles_plain_exceptions():
+    assert write._extract_error_message(ValueError("something broke")) == "something broke"
+
+
+def test_extract_error_message_handles_empty_str_exceptions():
+    """Exceptions with empty str() (like GoogleAdsException) should return repr."""
+    class SilentException(Exception):
+        def __init__(self):
+            self.data = "hidden"
+    e = SilentException()
+    result = write._extract_error_message(e)
+    assert result != ""
