@@ -1042,7 +1042,10 @@ def confirm_and_apply(
             "Plans expire when the MCP server restarts.",
         }
 
-    if config.safety.require_dry_run:
+    # Re-read config from disk to pick up runtime changes to require_dry_run
+    from adloop.config import load_config as _reload_cfg
+    _live_cfg = _reload_cfg()
+    if _live_cfg.safety.require_dry_run:
         dry_run = True
 
     if dry_run:
